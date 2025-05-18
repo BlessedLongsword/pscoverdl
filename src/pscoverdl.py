@@ -3,6 +3,8 @@ import re
 import concurrent.futures
 import yaml
 import json
+from configparser import ConfigParser
+from pathlib import Path
 from termcolor import colored
 from tqdm import tqdm
 from pathlib import Path
@@ -163,7 +165,7 @@ class PCSX2CoverDownloader(BaseCoverDownloader):
         with open(gameindex_file, encoding="utf-8-sig") as file:
             name_list = {
                 key: value["name"]
-                for key, value in yaml.load(file, Loader=yaml.CBaseLoader).items()
+                for key, value in yaml.load(file, Loader=yaml.BaseLoader).items()
             }
         return name_list
 
@@ -189,6 +191,14 @@ class DuckStationCoverDownloader(BaseCoverDownloader):
         return name_list
 
 
+class MultiDict(dict):
+    def __setitem__(self, k, v):
+        if isinstance(v, list) and k in self:
+            self[k].extend(v)
+        else:
+            super().__setitem__(k, v)
+
+
 def download_covers(cover_dir, gamelist_dir, cover_type, use_ssl, emulator):
     if emulator == "pcsx2":
         downloader = PCSX2CoverDownloader(
@@ -203,3 +213,72 @@ def download_covers(cover_dir, gamelist_dir, cover_type, use_ssl, emulator):
         return
 
     downloader.download()
+
+def get_gamelist_directories(emulator):
+    if emulator == "pcsx2":
+        try:
+            config_file = list(Path('/home').glob('**/*config/PCSX2/inis/PCSX2.ini'))[0]
+        except:
+            print(colored("PCSX2 configuration file not Found", "red"))
+            exit(1)
+    elif emulator == "duckstation":
+        config_file = list(Path('/home').glob('**/duckstation/settings.ini'))[0]
+    else:
+        print(colored(f"[ERROR]: Invalid emulator: {emulator}", "red"))
+    
+    paths = list()
+
+    class MultiDict(dict):
+        def __setitem__(self, k, v):
+            if isinstance(v, list) and k in self:
+                self[k].extend(v)
+            else:
+                super().__setitem__(k, v)
+
+    config = ConfigParser(dict_type=MultiDict, strict=False)
+    config.read(config_file)
+    
+    try:
+        paths.extend(config.get('GameList', 'Paths').splitlines())
+    except:
+        print(colored(f"No Paths set up for {emulator}", "yellow"))
+
+    try:    
+        for path in config.get('GameList', 'RecursivePaths').splitlines():
+            for root, _, _ in os.walk(path):
+                paths.append(root)
+    except:
+        print(colored(f"No Recursive Paths set up for {emulator}", "yellow"))
+
+    return paths
+
+if __name__ == '__main__':
+    p = Path.home()
+
+    try:
+        pcsx2_cover_dir = list(p.glob('**/*config/PCSX2/covers'))[0]
+    except:
+        print(colored("PCSX2 covers folder not found", "yellow"))
+    
+    try:
+        pcsx2_gamelist = list(p.glob('**/*config/PCSX2/cache/gamelist.cache'))[0]
+    except:
+        print(colored("PCSX2 gamelist not found", "yellow"))
+    
+    try:
+        duckstation_cover_dir = list(Path('/home').glob('**/duckstation/covers'))[0]
+    except:
+        print(colored("duckstation covers folder not found", "yellow"))
+    
+    try:
+        duckstation_gamelist = list(p.glob('**/duckstation/cache/gamelist.cache'))[0]
+    except:
+        print(colored("duckstation gamelist not found", "yellow"))
+
+    if pcsx2_cover_dir and pcsx2_gamelist:
+        for game_dir in get_gamelist_directories('pcsx2'):
+            download_covers(pcsx2_cover_dir, pcsx2_gamelist, 0, True, 'pcsx2')
+
+    if duckstation_cover_dir and duckstation_gamelist:
+        for game_dir in get_gamelist_directories('duckstation'):
+            download_covers(duckstation_cover_dir, duckstation_gamelist, 0, True, 'duckstation')
